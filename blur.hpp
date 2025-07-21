@@ -73,9 +73,56 @@ inline Image box_blur(const Image& image, int radius = 1) {
     return result;
 }
 
+inline Image integral_box_blur(const Image& image, int radius = 1) {
+    const int width = image.getWidth();
+    const int height = image.getHeight();
+    const int channels = image.getChannels();
+
+    if (radius <= 0) return image;
+
+    Image result(width, height, channels);
+
+    const uint8_t* src = image.data();
+    uint8_t* dst = result.data();
+
+    std::vector<int> integral (width * height * channels);
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+
+            int idx = (y * width +x) * channels;
+            int rsum = src[idx + 0], gsum = src[idx + 1], bsum = src[idx + 2];
+
+            if (x > 0) {
+                int lidx = idx - channels;
+                rsum += integral[lidx + 0];
+                gsum += integral[lidx + 1];
+                bsum += integral[lidx + 2];
+            }
+
+            if (y > 0) {
+                int tidx = idx - width * channels;
+                rsum += integral[tidx + 0];
+                gsum += integral[tidx + 1];
+                bsum += integral[tidx + 2];
+            }
+            if (x > 0 && y > 0) {
+                int didx = idx - (width * channels) - channels;
+                rsum -= integral[didx + 0];
+                gsum -= integral[didx + 1];
+                bsum -= integral[didx + 2];
+            }
+
+            integral[idx + 0] = rsum;
+            integral[idx + 1] = gsum;
+            integral[idx + 2] = bsum;
+        }
+    }
+}
+
 std::vector<std::vector<float>> generateGaussianKernel(int radius, float sigma) {
     int size = 2 * radius + 1;
-    std::vector<std::vector<float>> kernel(size, std::vector<float>(size));
+    std::vector<std::vector<float>> kernel(size, std::vector<float>(size));float
     float sum = 0.0f;
 
     for (int y = -radius; y <= radius; ++y) {
