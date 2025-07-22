@@ -73,52 +73,90 @@ inline Image box_blur(const Image& image, int radius = 1) {
     return result;
 }
 
-inline Image integral_box_blur(const Image& image, int radius = 1) {
+inline Image integral_box_blur_rgb(const Image& image, int radius = 1) {
     const int width = image.getWidth();
     const int height = image.getHeight();
     const int channels = image.getChannels();
-
-    if (radius <= 0) return image;
+    if (channels != 3 || radius <= 0) return image;
 
     Image result(width, height, channels);
 
     const uint8_t* src = image.data();
     uint8_t* dst = result.data();
 
-    std::vector<int> integral (width * height * channels);
+    std::vector<int> integral(width * height * channels /* 3 */, 0);
+
+
+    // fill integral image, https://leetcode.com/problems/range-sum-query-2d-immutable/solutions/2104317/dp-visualised-interview-tips/
 
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
+            int idx = (y * width + x) * 3;
 
-            int idx = (y * width +x) * channels;
-            int rsum = src[idx + 0], gsum = src[idx + 1], bsum = src[idx + 2];
+            int leftRed = (x > 0) ? integral[idx - 3 + 0] : 0;
+            int leftGreen = (x > 0) ? integral[idx - 3 + 1] : 0;
+            int leftBlue = (x > 0) ? integral[idx - 3 + 2] : 0;
 
-            if (x > 0) {
-                int lidx = idx - channels;
-                rsum += integral[lidx + 0];
-                gsum += integral[lidx + 1];
-                bsum += integral[lidx + 2];
-            }
+            int topRed  = (y > 0) ? integral[idx - width * 3 + 0] : 0;
+            int topGreen  = (y > 0) ? integral[idx - width * 3 + 1] : 0;
+            int topBlue  = (y > 0) ? integral[idx - width * 3 + 2] : 0;
 
-            if (y > 0) {
-                int tidx = idx - width * channels;
-                rsum += integral[tidx + 0];
-                gsum += integral[tidx + 1];
-                bsum += integral[tidx + 2];
-            }
-            if (x > 0 && y > 0) {
-                int didx = idx - (width * channels) - channels;
-                rsum -= integral[didx + 0];
-                gsum -= integral[didx + 1];
-                bsum -= integral[didx + 2];
-            }
+            int diagRed = (x > 0 && y > 0) ? integral[idx - width * 3 - 3 + 0] : 0;
+            int diagGreen = (x > 0 && y > 0) ? integral[idx - width * 3 - 3 + 1] : 0;
+            int diagBlue = (x > 0 && y > 0) ? integral[idx - width * 3 - 3 + 2] : 0;
 
-            integral[idx + 0] = rsum;
-            integral[idx + 1] = gsum;
-            integral[idx + 2] = bsum;
+
+            integral[idx + 0] = src[idx + 0] + leftRed + topRed - diagRed;
+            integral[idx + 1] = src[idx + 1] + leftGreen + topGreen - diagGreen;
+            integral[idx + 2] = src[idx + 2] + leftBlue + topBlue - diagBlue;
         }
     }
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            // max and min used for bounds checking, if OOB, we default to leftmost/rightmost.
+            int x1 = std::max(0, x - radius);
+            int y1 = std::max(0, y - radius);
+            int x2 = std::min(width - 1, x + radius);
+            int y2 = std::min(height - 1, y + radius);
+            int area = (x2 - x1 + 1) * (y2 - y1 + 1);
+
+            // D = (y2, x2), B = (y1-1, x2), C = (y2, x1-1), A = (y1-1, x1-1)
+            int idxD = (y2 * width + x2) * 3; // bottom-right-most-pixel in the box
+            int idxB = (y1 > 0) ? ((y1 - 1) * width + x2) * 3 : -1; // right-most pixel row above our box
+            int idxC = (x1 > 0) ? (y2 * width + (x1 - 1)) * 3 : -1; // right-most pixel col before our box
+            int idxA = (x1 > 0 && y1 > 0) ? ((y1 - 1) * width + (x1 - 1)) * 3 : -1; // diagonal pixel we addd to this bc of double deletion
+
+            int sumR = integral[idxD + 0];
+            int sumG = integral[idxD + 1];
+            int sumB = integral[idxD + 2];
+
+            if (idxB >= 0) {
+                sumR -= integral[idxB + 0];
+                sumG -= integral[idxB + 1];
+                sumB -= integral[idxB + 2];
+            }
+            if (idxC >= 0) {
+                sumR -= integral[idxC + 0];
+                sumG -= integral[idxC + 1];
+                sumB -= integral[idxC + 2];
+            }
+            if (idxA >= 0) {
+                sumR += integral[idxA + 0];
+                sumG += integral[idxA + 1];
+                sumB += integral[idxA + 2];
+            }
+
+            int dst_idx = (y * width + x) * 3;
+            dst[dst_idx + 0] = std::clamp(sumR / area, 0, 255); // get average R of all pixels in radius x radius box
+            dst[dst_idx + 1] = std::clamp(sumG / area, 0, 255); // get average G of all pixels in radius x radius box
+            dst[dst_idx + 2] = std::clamp(sumB / area, 0, 255);  // get average B of all pixels in radius x radius box
+        }
+    }
+
+    return result;
 }
+
 
 std::vector<std::vector<float>> generateGaussianKernel(int radius, float sigma) {
     int size = 2 * radius + 1;
@@ -371,4 +409,62 @@ inline Image radial_blur(const Image& image, int strength = 5, float center_x = 
     }
 
     return result;
+}
+
+inline Image stack_blur(const Image& image, int radius = 1) {
+
+    const int width = image.getWidth();
+    const int height = image.getHeight();
+    const int channels = image.getChannels();
+    if (channels != 3 || radius <= 0) return image;
+
+    Image result(width, height, channels);
+    const uint8_t* src = image.data();
+    uint8_t* dst = result.data();
+
+    int windowSize = (radius * 2) + 1;
+
+    for (int y = 0; y < height; y++) {
+        int rsum = 0, gsum = 0, bsum = 0;
+        for (int x = 0; x < (windowSize) && x < width; ++x) {
+            int idx = (y * width + x) * channels;
+            rsum += src[idx + 0]
+            gsum += src[idx + 1];
+            bsum += src[idx + 2];
+        }
+
+        for (int x = radius; x < width - radius; ++x) {
+           int dxt_idx = (y * width + x) * 3;
+            dst[dst_idx + 0] = static_cast<uint8_t>(rsum / windowSize);
+            dst[dst_idx + 1] = static_cast<uint8_t>(gsum / windowSize);
+            dst[dst_idx + 2] = static_cast<uint8_t>(bsum / windowSize);
+
+            int idx_out = (y * width + (x - radius)) * 3); // element we're popping out;
+            int idx_in = (y * width + (x + radius) + 1)) * 3; // element we're adding.
+
+            if (x + radius + 1 < width) {
+                rsum += src[idx_in + 0] - src[idx_out + 0]; // efficient, since we're removing idx_in and adding idx_out, take diff!
+                gsum += src[idx_in + 1] - src[idx_out + 1];
+                bsum += src[idx_in + 2] - src[idx_out + 2];
+            }
+        }
+
+        // Copy borders from sources:
+
+                // Optional: copy borders from source (left & right)
+        for (int x = 0; x < radius; ++x) {
+            int idx = (y * width + x) * 3;
+            dst[idx + 0] = src[idx + 0];
+            dst[idx + 1] = src[idx + 1];
+            dst[idx + 2] = src[idx + 2];
+        }
+        for (int x = width - radius; x < width; ++x) {
+            int idx = (y * width + x) * 3;
+            dst[idx + 0] = src[idx + 0];
+            dst[idx + 1] = src[idx + 1];
+            dst[idx + 2] = src[idx + 2];
+        }
+
+        // Now add a vertical pass on your own on 07/23
+
 }
