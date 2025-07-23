@@ -2,9 +2,6 @@
 // Created by Oscar Abreu on 7/23/25.
 //
 
-#ifndef BOX_BLUR_CUH
-#define BOX_BLUR_CUH
-
 __global__ void box_blur_cuda(unsigned char* d_input, unsigned char* d_output, size_t width, size_t height, size_t channels, int radius) {
     size_t y = blockIdx.y * blockDim.y + threadIdx.y;
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -73,4 +70,3 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-#endif //BOX_BLUR_CUH
