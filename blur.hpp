@@ -411,6 +411,7 @@ inline Image radial_blur(const Image& image, int strength = 5, float center_x = 
     return result;
 }
 
+
 inline Image stack_blur(const Image& image, int radius = 1) {
 
     const int width = image.getWidth();
@@ -426,6 +427,7 @@ inline Image stack_blur(const Image& image, int radius = 1) {
 
     for (int y = 0; y < height; y++) {
         int rsum = 0, gsum = 0, bsum = 0;
+        // initialize the window
         for (int x = 0; x < (windowSize) && x < width; ++x) {
             int idx = (y * width + x) * channels;
             rsum += src[idx + 0]
@@ -434,13 +436,13 @@ inline Image stack_blur(const Image& image, int radius = 1) {
         }
 
         for (int x = radius; x < width - radius; ++x) {
-           int dxt_idx = (y * width + x) * 3;
+           int dxt_idx = (y * width + x) * channels;
             dst[dst_idx + 0] = static_cast<uint8_t>(rsum / windowSize);
             dst[dst_idx + 1] = static_cast<uint8_t>(gsum / windowSize);
             dst[dst_idx + 2] = static_cast<uint8_t>(bsum / windowSize);
 
-            int idx_out = (y * width + (x - radius)) * 3); // element we're popping out;
-            int idx_in = (y * width + (x + radius) + 1)) * 3; // element we're adding.
+            int idx_out = (y * width + (x - radius)) * channels); // element we're popping out;
+            int idx_in = (y * width + (x + radius) + 1)) * channels; // element we're adding.
 
             if (x + radius + 1 < width) {
                 rsum += src[idx_in + 0] - src[idx_out + 0]; // efficient, since we're removing idx_in and adding idx_out, take diff!
@@ -449,9 +451,6 @@ inline Image stack_blur(const Image& image, int radius = 1) {
             }
         }
 
-        // Copy borders from sources:
-
-                // Optional: copy borders from source (left & right)
         for (int x = 0; x < radius; ++x) {
             int idx = (y * width + x) * 3;
             dst[idx + 0] = src[idx + 0];
@@ -464,7 +463,40 @@ inline Image stack_blur(const Image& image, int radius = 1) {
             dst[idx + 1] = src[idx + 1];
             dst[idx + 2] = src[idx + 2];
         }
+        for (int x = 0; x < width; ++x) {
+            rsum = 0, gsum = 0, bsum = 0;
+            for (int y = 0; y < windowSize; ++y) {
+                int idx = (y * width + x) * channels;
+                rsum += src[idx + 0];
+                gsum += src[idx + 1];
+                bsum += src[idx + 2];
+            }
 
-        // Now add a vertical pass on your own on 07/23
+            for (int y = radius; y < height - radius; y++) {
+                int dxt_idx = (y * width + x) * channels;
+                dst[dxt_idx + 0] = static_cast<uint8_t>(rsum / windowSize);
+                dst[dst_idx + 1] = static_cast<uint8_t>(gsum / windowSize);
+                dst[dst_idx + 2] = static_cast<uint8_t>(bsum / windowSize);
 
+                int idx_out = ((y - radius) * width + x) * channels;
+                int idx_in = (((y + radius + 1) * width) + x) * channels;
+
+                if (y + radius + 1 < height) {
+                    rsum += src[idx_in + 0] - src[idx_out + 0]; // efficient, since we're removing idx_in and adding idx_out, take diff!
+                    gsum += src[idx_in + 1] - src[idx_out + 1];
+                    bsum += src[idx_in + 2] - src[idx_out + 2];
+                }
+                    for (int y = 0; y < radius; ++y) {
+                        int idx = (y * width + x) * 3;
+                        dst[idx + 0] = src[idx + 0];
+                        dst[idx + 1] = src[idx + 1];
+                        dst[idx + 2] = src[idx + 2];
+                    }
+                    for (int y = width - radius; y < width; ++y) {
+                        int idx = (y * width + x) * 3;
+                        dst[idx + 0] = src[idx + 0];
+                        dst[idx + 1] = src[idx + 1];
+                        dst[idx + 2] = src[idx + 2];
+                    }
+        }
 }
