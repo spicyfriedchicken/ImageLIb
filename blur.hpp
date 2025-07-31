@@ -5,16 +5,15 @@
 // bilateral_blur	Blur that preserves edges by considering pixel similarity and spatial distance // DONE - ST **
 // motion_blur	Simulates blur caused by movement; directional kernel along X/Y/diagonal // DONE - NAIVE **
 // radial_blur	Blurs pixels outward from a center point; gives a zoom or whirl look // DONE - NAIVE **
+// box_blur_integral	Fast box blur using summed-area table (integral image)  // DONE - NAIVE **
+// stack_blur	Approximation of Gaussian blur using multiple box blurs  // DONE - NAIVE **
+// anisotropic_blur	Applies more blur in one direction than another (e.g., horizontal smoothing)  // DONE - NAIVE **
 // ---------------------------
-// box_blur_integral	Fast box blur using summed-area table (integral image)
-// stack_blur	Approximation of Gaussian blur using multiple box blurs
-// anisotropic_blur	Applies more blur in one direction than another (e.g., horizontal smoothing)
 // variable_blur	Blur radius varies based on a mask or per-pixel map (depth-of-field effect)
 // directional_blur(angle)	Applies blur along an arbitrary angle instead of just X or Y
 // selective_blur(mask)	Applies blur only to selected areas of the image using a binary or alpha mask
 // depth_blur(depth_map)	Simulates depth-of-field using a depth map to control blur strength
 // edge_preserving_blur()	Smooths inside regions but avoids blurring across edges (e.g. bilateral)
-// recursive_gaussian_blur()	Optimized separable Gaussian using recursive filters (faster for large radii)
 
 #include "utils.hpp"
 
@@ -157,10 +156,15 @@ inline Image integral_box_blur_rgb(const Image& image, int radius = 1) {
     return result;
 }
 
+Image gaussianBlur(const Image& image, int radius = 1, float sigma = 1.0f) {
+    const int width = image.getWidth();
+    const int height = image.getHeight();
+    const int channels = image.getChannels();
 
-std::vector<std::vector<float>> generateGaussianKernel(int radius, float sigma) {
+    if (radius <= 0 || sigma <= 0.0f) return image;
+
     int size = 2 * radius + 1;
-    std::vector<std::vector<float>> kernel(size, std::vector<float>(size));float
+    std::vector<std::vector<float>> kernel(size, std::vector<float>(size));
     float sum = 0.0f;
 
     for (int y = -radius; y <= radius; ++y) {
@@ -175,18 +179,6 @@ std::vector<std::vector<float>> generateGaussianKernel(int radius, float sigma) 
     for (int y = 0; y < size; ++y)
         for (int x = 0; x < size; ++x)
             kernel[y][x] /= sum;
-
-    return kernel;
-}
-
-Image gaussianBlur(const Image& image, int radius = 1, float sigma = 1.0f) {
-    const int width = image.getWidth();
-    const int height = image.getHeight();
-    const int channels = image.getChannels();
-
-    if (radius <= 0 || sigma <= 0.0f) return image;
-
-    const std::vector<std::vector<float>> kernel = generateGaussianKernel(radius, sigma);
 
     Image result(width, height, channels);
     const uint8_t* src = image.data();
@@ -411,92 +403,108 @@ inline Image radial_blur(const Image& image, int strength = 5, float center_x = 
     return result;
 }
 
-
 inline Image stack_blur(const Image& image, int radius = 1) {
-
     const int width = image.getWidth();
     const int height = image.getHeight();
     const int channels = image.getChannels();
     if (channels != 3 || radius <= 0) return image;
 
+    Image temp(width, height, channels);
     Image result(width, height, channels);
+
     const uint8_t* src = image.data();
+    uint8_t* tmp = temp.data();
     uint8_t* dst = result.data();
+    const int windowSize = radius * 2 + 1;
 
-    int windowSize = (radius * 2) + 1;
-
-    for (int y = 0; y < height; y++) {
-        int rsum = 0, gsum = 0, bsum = 0;
-        // initialize the window
-        for (int x = 0; x < (windowSize) && x < width; ++x) {
-            int idx = (y * width + x) * channels;
-            rsum += src[idx + 0]
-            gsum += src[idx + 1];
-            bsum += src[idx + 2];
-        }
-
-        for (int x = radius; x < width - radius; ++x) {
-           int dxt_idx = (y * width + x) * channels;
-            dst[dst_idx + 0] = static_cast<uint8_t>(rsum / windowSize);
-            dst[dst_idx + 1] = static_cast<uint8_t>(gsum / windowSize);
-            dst[dst_idx + 2] = static_cast<uint8_t>(bsum / windowSize);
-
-            int idx_out = (y * width + (x - radius)) * channels); // element we're popping out;
-            int idx_in = (y * width + (x + radius) + 1)) * channels; // element we're adding.
-
-            if (x + radius + 1 < width) {
-                rsum += src[idx_in + 0] - src[idx_out + 0]; // efficient, since we're removing idx_in and adding idx_out, take diff!
-                gsum += src[idx_in + 1] - src[idx_out + 1];
-                bsum += src[idx_in + 2] - src[idx_out + 2];
-            }
-        }
-
-        for (int x = 0; x < radius; ++x) {
-            int idx = (y * width + x) * 3;
-            dst[idx + 0] = src[idx + 0];
-            dst[idx + 1] = src[idx + 1];
-            dst[idx + 2] = src[idx + 2];
-        }
-        for (int x = width - radius; x < width; ++x) {
-            int idx = (y * width + x) * 3;
-            dst[idx + 0] = src[idx + 0];
-            dst[idx + 1] = src[idx + 1];
-            dst[idx + 2] = src[idx + 2];
-        }
+    for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            rsum = 0, gsum = 0, bsum = 0;
-            for (int y = 0; y < windowSize; ++y) {
-                int idx = (y * width + x) * channels;
+            int rsum = 0, gsum = 0, bsum = 0;
+
+            for (int k = -radius; k <= radius; ++k) {
+                int px = std::clamp(x + k, 0, width - 1);
+                int idx = (y * width + px) * 3;
                 rsum += src[idx + 0];
                 gsum += src[idx + 1];
                 bsum += src[idx + 2];
             }
 
-            for (int y = radius; y < height - radius; y++) {
-                int dxt_idx = (y * width + x) * channels;
-                dst[dxt_idx + 0] = static_cast<uint8_t>(rsum / windowSize);
-                dst[dst_idx + 1] = static_cast<uint8_t>(gsum / windowSize);
-                dst[dst_idx + 2] = static_cast<uint8_t>(bsum / windowSize);
-
-                int idx_out = ((y - radius) * width + x) * channels;
-                int idx_in = (((y + radius + 1) * width) + x) * channels;
-
-                if (y + radius + 1 < height) {
-                    rsum += src[idx_in + 0] - src[idx_out + 0]; // efficient, since we're removing idx_in and adding idx_out, take diff!
-                    gsum += src[idx_in + 1] - src[idx_out + 1];
-                    bsum += src[idx_in + 2] - src[idx_out + 2];
-                }
-                    for (int y = 0; y < radius; ++y) {
-                        int idx = (y * width + x) * 3;
-                        dst[idx + 0] = src[idx + 0];
-                        dst[idx + 1] = src[idx + 1];
-                        dst[idx + 2] = src[idx + 2];
-                    }
-                    for (int y = width - radius; y < width; ++y) {
-                        int idx = (y * width + x) * 3;
-                        dst[idx + 0] = src[idx + 0];
-                        dst[idx + 1] = src[idx + 1];
-                        dst[idx + 2] = src[idx + 2];
-                    }
+            int idx = (y * width + x) * 3;
+            tmp[idx + 0] = static_cast<uint8_t>(rsum / windowSize);
+            tmp[idx + 1] = static_cast<uint8_t>(gsum / windowSize);
+            tmp[idx + 2] = static_cast<uint8_t>(bsum / windowSize);
         }
+    }
+
+    for (int x = 0; x < width; ++x) {
+        for (int y = 0; y < height; ++y) {
+            int rsum = 0, gsum = 0, bsum = 0;
+
+            for (int k = -radius; k <= radius; ++k) {
+                int py = std::clamp(y + k, 0, height - 1);
+                int idx = (py * width + x) * 3;
+                rsum += tmp[idx + 0];
+                gsum += tmp[idx + 1];
+                bsum += tmp[idx + 2];
+            }
+
+            int idx = (y * width + x) * 3;
+            dst[idx + 0] = static_cast<uint8_t>(rsum / windowSize);
+            dst[idx + 1] = static_cast<uint8_t>(gsum / windowSize);
+            dst[idx + 2] = static_cast<uint8_t>(bsum / windowSize);
+        }
+    }
+
+    return result;
+}
+
+Image anisotropic_blur(const Image& src, int ksize, float sigma_x, float sigma_y, float angle_deg) {
+    Image dst(src.width, src.height, src.channels);
+    float theta = angle_deg * M_PI / 180.0f;
+    int center = ksize / 2;
+
+    float cos_theta = std::cos(theta);
+    float sin_theta = std::sin(theta);
+
+    std::vector<std::vector<float>> kernel(ksize, std::vector<float>(ksize));
+    float sum = 0.0f;
+
+    for (int y = 0; y < ksize; ++y) {
+        for (int x = 0; x < ksize; ++x) {
+            float dx = x - center;
+            float dy = y - center;
+
+            float x_rot =  cos_theta * dx + sin_theta * dy;
+            float y_rot = -sin_theta * dx + cos_theta * dy;
+
+            float val = std::exp(-((x_rot * x_rot) / (2 * sigma_x * sigma_x) +
+                                   (y_rot * y_rot) / (2 * sigma_y * sigma_y)));
+            kernel[y][x] = val;
+            sum += val;
+        }
+    }
+
+    for (int y = 0; y < ksize; ++y)
+        for (int x = 0; x < ksize; ++x)
+            kernel[y][x] /= sum;
+
+    int pad = ksize / 2;
+
+    for (int y = 0; y < src.height; ++y) {
+        for (int x = 0; x < src.width; ++x) {
+            for (int c = 0; c < src.channels; ++c) {
+                float acc = 0.0f;
+                for (int ky = 0; ky < ksize; ++ky) {
+                    for (int kx = 0; kx < ksize; ++kx) {
+                        int ix = std::clamp(x + kx - pad, 0, src.width - 1);
+                        int iy = std::clamp(y + ky - pad, 0, src.height - 1);
+                        acc += kernel[ky][kx] * src(ix, iy, c);
+                    }
+                }
+                dst(x, y, c) = static_cast<uint8_t>(std::clamp(acc, 0.0f, 255.0f));
+            }
+        }
+    }
+
+    return dst;
 }

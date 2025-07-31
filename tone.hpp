@@ -60,9 +60,7 @@ inline Image adjust_contrast(const Image& image, const float contrast_const) {
             }
         }
     }
-
     return result;
-
 }
 
 inline Image adjust_gamma(const Image& image, float gamma_const) {
